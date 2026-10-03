@@ -67,20 +67,7 @@ desktop_exec_tokens() {
   [[ -n $token ]] && exec_tokens+=("$token")
 }
 
-browser_file=""
-for candidate in "$HOME/.local/share/applications" "$HOME/.nix-profile/share/applications" /usr/share/applications; do
-  if [[ -f $candidate/$browser ]]; then
-    browser_file="$candidate/$browser"
-    break
-  fi
-done
-
-if [[ -n $browser_file ]]; then
-  exec_line=$(sed -n 's/^Exec=//p' "$browser_file" | head -1)
-  desktop_exec_tokens "$exec_line"
-else
-  exec_tokens=("$browser")
-fi
+desktop_exec_tokens "$(sed -n 's/^Exec=//p' {~/.local,~/.nix-profile,/usr}/share/applications/$browser 2>/dev/null | head -1)"
 
 # Field codes %u/%U/%f/%F/%i/%c/%k never apply here: the web-app URL is passed
 # as the browser's --app= argument instead.
