@@ -71,7 +71,8 @@ trap cleanup EXIT
 # the speedtest panel -- disappears without signalling). timeout is the hard
 # per-attempt cap: it fires even while curl is stuck inside a hung connection
 # attempt, which no loop-level deadline reached between attempts can do. Workers
-# keep the round-robin going rather than dying on the first failed request.
+# move on to the next URL after a failed request, pausing so a fast failure
+# cannot spin, rather than dying on it.
 max_seconds=8
 connect_timeout=5
 max_time=15
@@ -91,7 +92,7 @@ traffic_worker() {
         break
       fi
       url=${urls[$((idx % url_count))]}
-      timeout -k 1 "$max_seconds" curl -fsS --connect-timeout "$connect_timeout" --max-time "$max_time" -o /dev/null "$url" 2>/dev/null || continue
+      timeout -k 1 "$max_seconds" curl -fsS --connect-timeout "$connect_timeout" --max-time "$max_time" -o /dev/null "$url" 2>/dev/null || sleep 1
       idx=$((idx + 1))
     done
   else
@@ -101,7 +102,7 @@ traffic_worker() {
         break
       fi
       url=${urls[$((idx % url_count))]}
-      dd if=/dev/zero bs=1M count=64 2>/dev/null | timeout -k 1 "$max_seconds" curl -fsS --connect-timeout "$connect_timeout" --max-time "$max_time" -o /dev/null -X POST --data-binary @- "$url" 2>/dev/null || continue
+      dd if=/dev/zero bs=1M count=64 2>/dev/null | timeout -k 1 "$max_seconds" curl -fsS --connect-timeout "$connect_timeout" --max-time "$max_time" -o /dev/null -X POST --data-binary @- "$url" 2>/dev/null || sleep 1
       idx=$((idx + 1))
     done
   fi
