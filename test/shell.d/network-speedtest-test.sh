@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 
 require_command jq
+require_command pgrep
 require_command setsid
 
 speedtest="$ROOT/bin/omarchy-network-speedtest"
@@ -50,6 +51,15 @@ case $TEST_CURL_MODE in
   fail)
     exit 22
     ;;
+  stall)
+    # Healthy transfers until 6s in, then every endpoint hangs.
+    [[ -f $TEST_DIR/started ]] || date +%s >"$TEST_DIR/started"
+    if (( $(date +%s) - $(<"$TEST_DIR/started") >= 6 )); then
+      touch "$TEST_DIR/stalled"
+      exec sleep 60
+    fi
+    sleep 0.2
+    ;;
 esac
 EOF
 chmod +x "$test_tmp/bin/"*
@@ -88,4 +98,29 @@ for direction in down up; do
   (( $(wc -l <"$requests") > 8 )) || fail "a $direction worker keeps going after a failed request" "$(<"$requests")"
   (( $(wc -l <"$requests") < 100 )) || fail "a failing $direction endpoint is not retried in a tight loop" "$(wc -l <"$requests") requests"
   pass "a failed $direction request moves the worker to the next endpoint"
+done
+
+# SIGKILL skips the EXIT trap, as when the shell tears the panel down hard. The
+# workers must still stop on their own, mid-transfer included, near the script's
+# 8s cap rather than a whole transfer timeout past it.
+started=$SECONDS
+start_speedtest down stall
+start_speedtest up stall
+sleep 2
+declare -A killed=([down]=${sessions[-2]} [up]=${sessions[-1]})
+kill -KILL "${killed[@]}"
+wait "${killed[@]}" 2>/dev/null || true
+
+for direction in down up; do
+  session=${killed[$direction]}
+
+  while (( SECONDS - started < 12 )) && pgrep -s "$session" >/dev/null; do
+    sleep 0.2
+  done
+
+  if pgrep -s "$session" >/dev/null; then
+    fail "speedtest $direction traffic stops by itself after the script is killed" "$(pgrep -a -s "$session")"
+  fi
+  [[ -f $test_tmp/$direction-stall/stalled ]] || fail "speedtest $direction reaches a hung transfer before its deadline"
+  pass "speedtest $direction traffic stops by itself after the script is killed"
 done
