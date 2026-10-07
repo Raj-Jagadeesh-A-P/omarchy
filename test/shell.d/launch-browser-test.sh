@@ -83,6 +83,34 @@ grep -Fx '^chromium.*$' "$focus_log" >/dev/null ||
 
 pass "browser launcher follows opened links to the browser workspace"
 
+launched_command() {
+  sed 's/.* uwsm-app -- //' "$launch_log"
+}
+
+HOME="$test_home" PATH="$mock_bin:$PATH" OMARCHY_TEST_BROWSER_LAUNCH="$launch_log" \
+  OMARCHY_TEST_BROWSER_FOCUS="$focus_log" bash "$ROOT/bin/omarchy-launch-browser" --private "https://knowledge.test/"
+
+[[ $(launched_command) == "chromium --incognito https://knowledge.test/" ]] ||
+  fail "private browser launch puts the flag before the URL" "actual: $(launched_command)"
+pass "browser launcher keeps the private flag ahead of the URL"
+
+cat >"$test_home/.local/share/applications/chromium.desktop" <<'EOF'
+[Desktop Entry]
+Exec=/usr/bin/env "BROWSER_NOTE=two words" chromium --class=wrapped %U
+EOF
+
+HOME="$test_home" PATH="$mock_bin:$PATH" OMARCHY_TEST_BROWSER_LAUNCH="$launch_log" \
+  OMARCHY_TEST_BROWSER_FOCUS="$focus_log" bash "$ROOT/bin/omarchy-launch-browser" "https://example.test/wrapped"
+
+[[ $(launched_command) == "/usr/bin/env BROWSER_NOTE=two words chromium --class=wrapped https://example.test/wrapped" ]] ||
+  fail "browser launcher runs a wrapped Exec command in full" "actual: $(launched_command)"
+pass "browser launcher runs a wrapped Exec command in full"
+
+cat >"$test_home/.local/share/applications/chromium.desktop" <<'EOF'
+[Desktop Entry]
+Exec=chromium %U
+EOF
+
 rm -f "$launch_log"
 cat >"$mock_bin/omarchy-cmd-browser-handoff" <<'SH'
 #!/bin/bash

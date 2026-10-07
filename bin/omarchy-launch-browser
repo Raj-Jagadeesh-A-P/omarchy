@@ -79,70 +79,51 @@ fi
 exec_line=$(sed -n 's/^Exec=//p' "$browser_file" | head -1)
 desktop_exec_tokens "$exec_line"
 
-# Split the arguments: the first non-"--private" one is the URL, a later
-# --private becomes the browser's private-window flag, everything else passes
-# through untouched.
-url=""
-url_pending=true
-passthrough_args=()
-
-for argument in "$@"; do
-  if [[ $argument == "--private" ]]; then
-    passthrough_args+=("--private")
-  elif [[ $url_pending == true ]]; then
-    url=$argument
-    url_pending=false
-  else
-    passthrough_args+=("$argument")
-  fi
-done
-
-# Substitute field codes: %u/%U/%f/%F take a URL, %i/%c/%k expand to details
-# we do not replicate. Without a matching code, the URL goes on the end.
-final_tokens=()
-url_placed=false
-
-for token in "${exec_tokens[@]}"; do
-  case "$token" in
-    %u | %U | %f | %F)
-      if [[ -n $url && $url_placed == false ]]; then
-        final_tokens+=("$url")
-        url_placed=true
-      fi
-      ;;
-    %i | %c | %k) ;;
-    *) final_tokens+=("$token") ;;
-  esac
-done
-
-if [[ -n $url && $url_placed == false ]]; then
-  final_tokens+=("$url")
-fi
-
-# Detect the private-window flag from the real browser binary.
-if "${final_tokens[0]}" --help 2>/dev/null | grep -q MOZ_LOG; then
+if "${exec_tokens[0]}" --help 2>/dev/null | grep -q MOZ_LOG; then
   private_flag="--private-window"
-elif [[ " ${final_tokens[*]} " == *edge* ]]; then
+elif [[ ${exec_tokens[*]} =~ edge ]]; then
   private_flag="--inprivate"
 else
   private_flag="--incognito"
 fi
 
-final_args=()
-for argument in "${passthrough_args[@]}"; do
-  if [[ $argument == "--private" ]]; then
-    final_args+=("$private_flag")
-  else
-    final_args+=("$argument")
+# The arguments go in where the URL field code is, in the order given, since
+# Firefox only opens a URL in the private window when it follows the flag.
+arguments=("${@/--private/$private_flag}")
+browser_command=()
+arguments_placed=false
+
+for token in "${exec_tokens[@]}"; do
+  case "$token" in
+    %u | %U | %f | %F)
+      if [[ $arguments_placed == false ]]; then
+        browser_command+=("${arguments[@]}")
+        arguments_placed=true
+      fi
+      ;;
+    %i | %c | %k) ;;
+    *) browser_command+=("$token") ;;
+  esac
+done
+
+if [[ $arguments_placed == false ]]; then
+  browser_command+=("${arguments[@]}")
+fi
+
+if ! omarchy-cmd-browser-handoff "${browser_command[@]}"; then
+  systemd-run --user --quiet --collect --unit="omarchy-browser-$(date +%s%N)" \
+    --property=StandardOutput=null --property=StandardError=null \
+    uwsm-app -- "${browser_command[@]}"
+fi
+
+url=""
+for argument in "$@"; do
+  if [[ $argument != "--private" ]]; then
+    url=$argument
+    break
   fi
 done
 
-if ! omarchy-cmd-browser-handoff "${final_tokens[@]}" "${final_args[@]}"; then
-  systemd-run --user --quiet --collect --unit="omarchy-browser-$(date +%s%N)" \
-    --property=StandardOutput=null --property=StandardError=null \
-    uwsm-app -- "${final_tokens[@]}" "${final_args[@]}"
-fi
-
 if [[ -n $url && -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
-  omarchy-hyprland-focus-app "^$(basename "${final_tokens[0]}" -stable).*$" || true
+  omarchy-hyprland-focus-app "^$(basename "${exec_tokens[0]}" -stable).*$" || true
 fi
