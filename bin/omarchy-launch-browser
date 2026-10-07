@@ -81,10 +81,19 @@ desktop_exec_tokens "$exec_line"
 
 if "${exec_tokens[0]}" --help 2>/dev/null | grep -q MOZ_LOG; then
   private_flag="--private-window"
-elif [[ ${exec_tokens[*]} =~ edge ]]; then
-  private_flag="--inprivate"
 else
   private_flag="--incognito"
+
+  # A wrapped Edge is a later command or Flatpak id; options and VAR=value never are.
+  for token in "${exec_tokens[@]}"; do
+    if [[ $token != -* && $token != *=* && ${token##*/} =~ ^(microsoft-edge|msedge|com\.microsoft\.Edge$) ]]; then
+      private_flag="--inprivate"
+    fi
+  done
+
+  if [[ ${exec_tokens[0]} =~ edge ]]; then
+    private_flag="--inprivate"
+  fi
 fi
 
 # The arguments go in where the URL field code is, in the order given, since
