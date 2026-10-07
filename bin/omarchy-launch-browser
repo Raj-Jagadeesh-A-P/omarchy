@@ -3,10 +3,7 @@
 # omarchy:summary=Launch the default browser as determined by xdg-settings.
 # omarchy:args=[url]
 
-default_browser=$(env -u BROWSER xdg-settings get default-web-browser)
-if [[ -z $default_browser ]]; then
-  default_browser=$(xdg-mime query default x-scheme-handler/https)
-fi
+default_browser=$(omarchy-cmd-default-browser)
 
 # Parse a .desktop Exec= line into tokens, honouring the desktop-entry quoting
 # rules, so a wrapped launcher (env VAR=val app, flatpak run App, python
@@ -140,9 +137,11 @@ for argument in "${passthrough_args[@]}"; do
   fi
 done
 
-systemd-run --user --quiet --collect --unit="omarchy-browser-$(date +%s%N)" \
-  --property=StandardOutput=null --property=StandardError=null \
-  uwsm-app -- "${final_tokens[@]}" "${final_args[@]}"
+if ! omarchy-cmd-browser-handoff "${final_tokens[@]}" "${final_args[@]}"; then
+  systemd-run --user --quiet --collect --unit="omarchy-browser-$(date +%s%N)" \
+    --property=StandardOutput=null --property=StandardError=null \
+    uwsm-app -- "${final_tokens[@]}" "${final_args[@]}"
+fi
 
 if [[ -n $url && -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
   omarchy-hyprland-focus-app "^$(basename "${final_tokens[0]}" -stable).*$" || true
